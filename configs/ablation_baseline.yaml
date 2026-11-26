@@ -1,0 +1,33 @@
+seed: 42
+model:
+  vocab_size: 8000
+  block_size: 256
+  n_layer: 6
+  n_head: 6
+  n_embd: 384
+  dropout: 0.1
+  pos_type: learned
+data:
+  dataset: tinystories
+  max_train_stories: 50000
+  max_val_stories: 2000
+  tinyshakespeare_path: data/tinyshakespeare.txt
+training:
+  batch_size: 64
+  max_steps: 3000
+  learning_rate: 0.0003
+  min_lr: 3.0e-05
+  betas:
+  - 0.9
+  - 0.95
+  weight_decay: 0.1
+  warmup_steps: 500
+  grad_clip: 1.0
+  eval_interval: 500
+  eval_iters: 50
+  checkpoint_interval: 3000
+paths:
+  tokenizer: checkpoints/tokenizer.json
+  checkpoint_dir: checkpoints/ablation_baseline
+  log_dir: logs
+  log_name: ablation_baseline.csv
