@@ -1,0 +1,9 @@
+torch>=2.4
+tokenizers>=0.20
+datasets>=2.20
+pyyaml>=6.0
+numpy>=1.26
+fastapi>=0.110
+uvicorn>=0.29
+# For the Kaggle notebook only (installed there, not needed for CPU serving):
+# transformers is NOT a dependency of the model — the model is from scratch.
