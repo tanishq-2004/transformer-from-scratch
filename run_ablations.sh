@@ -6,6 +6,7 @@
 # Logs land in logs/ablation_<name>.csv ; at the end they are copied to
 # Google Drive (if mounted) alongside the full-run logs.
 set -u
+mkdir -p logs checkpoints
 
 for cfg in ablation_baseline ablation_1head ablation_sinusoidal ablation_2layer ablation_4layer ablation_ctx128 ablation_ctx512; do
   log="logs/${cfg}.csv"
