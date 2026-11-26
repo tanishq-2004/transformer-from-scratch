@@ -66,10 +66,23 @@ demo = gr.Interface(
     title="Transformer from Scratch — TinyStories Text Generation",
     description=(
         "A decoder-only GPT-style Transformer built in PyTorch from scratch "
-        "(no nn.Transformer, no HF model). 6 layers, 6 heads, 384 hidden, "
-        "~14M parameters, trained on a 200,000-story TinyStories subset for "
-        "8,000 steps. Final: train loss 1.7893, val loss 1.8295, "
-        "val perplexity 6.23."
+        "(no nn.Transformer, no HF model) that writes TinyStories-style "
+        "children's stories. Type a prompt below and it continues the story, "
+        "one token at a time."
+    ),
+    article=(
+        "## About this model\n\n"
+        "- **Architecture:** 6 layers, 6 heads, 384 hidden, context 256 — "
+        "**13,792,128 parameters**, all hand-coded (attention, causal masking, "
+        "BPE tokenizer with vocab 8,000)\n"
+        "- **Trained on:** a 200,000-story subset of TinyStories, 8,000 steps "
+        "on a Colab T4 GPU (~101 min)\n"
+        "- **Results:** train loss **1.7893**, val loss **1.8295**, "
+        "val perplexity **6.23**\n\n"
+        "The model writes simple children's stories — expect small grammar "
+        "slips, not GPT-level prose. Code and full write-up: "
+        "[github.com/tanishq-2004/transformer-from-scratch]"
+        "(https://github.com/tanishq-2004/transformer-from-scratch)"
     ),
     examples=[
         ["Once upon a time", 80, 0.8, 50],
