@@ -1,14 +1,22 @@
-"""Evaluation: perplexity on a validation set + generation samples.
+"""Evaluation: perplexity on a validation or test set + generation samples.
 
 Usage:
     python -m src.evaluate --checkpoint checkpoints/ckpt_step_5000.pt \
         --tokenizer checkpoints/tokenizer.json --config configs/small.yaml \
         --max_val_stories 2000
 
+    python -m src.evaluate --checkpoint checkpoints/ckpt_step_8000.pt \
+        --tokenizer checkpoints/tokenizer.json --config configs/small.yaml \
+        --split test --output logs/eval_test.json
+
 Reports, from the actual checkpoint (nothing invented):
-  - validation cross-entropy loss
-  - validation perplexity = exp(val loss)
+  - cross-entropy loss and perplexity = exp(loss) on the chosen split
+    (validation, or test — the test split is the second half of a seed-42
+    shuffle of the validation stories, disjoint from the validation set,
+    and never trained on)
   - generation samples for a fixed set of prompts at temperature 0.8 / top-k 50
+  - inference latency: median wall time for one greedy generation of
+    max_new_tokens tokens, plus generation tokens/sec
 Writes the results to logs/eval_<step>.json when --output is given.
 """
 
@@ -18,6 +26,7 @@ import argparse
 import json
 import math
 import os
+import time
 
 import torch
 import yaml
@@ -40,8 +49,13 @@ def main():
     parser.add_argument("--tokenizer", required=True)
     parser.add_argument("--config", required=True)
     parser.add_argument("--max_val_stories", type=int, default=2000)
+    parser.add_argument("--split", choices=["validation", "test"], default="validation",
+                        help="which split to evaluate perplexity on")
+    parser.add_argument("--max_test_stories", type=int, default=2000)
     parser.add_argument("--eval_iters", type=int, default=50)
     parser.add_argument("--max_new_tokens", type=int, default=50)
+    parser.add_argument("--latency_reps", type=int, default=5,
+                        help="repetitions for the median inference-latency measurement")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
@@ -64,21 +78,28 @@ def main():
     model.load_state_dict(ckpt["model"])
     model.eval()
 
-    val_texts = load_tinystories_texts("validation", args.max_val_stories)
-    val_data = encode_texts_to_array(
-        lambda t: encode(tokenizer, t, add_bos=True, add_eos=True), val_texts
+    if args.split == "test":
+        # Test = the second half of a seed-42 shuffle of the validation split.
+        # The first half is the validation set, so test is disjoint from it,
+        # and neither half was ever trained on.
+        all_val_texts = load_tinystories_texts("validation", args.max_test_stories * 2)
+        eval_texts = all_val_texts[args.max_test_stories:]
+    else:
+        eval_texts = load_tinystories_texts("validation", args.max_val_stories)
+    eval_data = encode_texts_to_array(
+        lambda t: encode(tokenizer, t, add_bos=True, add_eos=True), eval_texts
     )
     total = 0.0
     with torch.no_grad():
         for _ in range(args.eval_iters):
-            x, y = get_batch(val_data, cfg["training"]["batch_size"],
+            x, y = get_batch(eval_data, cfg["training"]["batch_size"],
                              cfg["model"]["block_size"], device)
             _, loss, _ = model(x, targets=y)
             total += loss.item()
-    val_loss = total / args.eval_iters
-    perplexity = math.exp(val_loss)
-    print(f"val_loss: {val_loss:.4f}")
-    print(f"val_perplexity: {perplexity:.2f}  (on {args.max_val_stories} val stories, "
+    split_loss = total / args.eval_iters
+    perplexity = math.exp(split_loss)
+    print(f"{args.split}_loss: {split_loss:.4f}")
+    print(f"{args.split}_perplexity: {perplexity:.2f}  (on {len(eval_texts)} {args.split} stories, "
           f"{args.eval_iters} batches)")
 
     samples = []
@@ -94,12 +115,38 @@ def main():
             samples.append({"prompt": prompt, "generated": text})
             print(f"\nPROMPT: {prompt}\n{text}")
 
+    # Inference latency: median wall time for one greedy generation of
+    # max_new_tokens tokens, plus generation tokens/sec. Greedy (temp 0)
+    # so the measurement is reproducible.
+    bench_ids = torch.tensor(
+        [[bos] + tokenizer.encode("Once upon a time").ids], dtype=torch.long, device=device
+    )
+    latencies = []
+    with torch.no_grad():
+        for _ in range(args.latency_reps):
+            t0 = time.perf_counter()
+            model.generate(bench_ids, max_new_tokens=args.max_new_tokens,
+                           temperature=0.0, top_k=None)
+            latencies.append(time.perf_counter() - t0)
+    latencies.sort()
+    median_latency = latencies[len(latencies) // 2]
+    gen_tokens_per_sec = args.max_new_tokens / median_latency
+    print(f"\ninference latency (median of {args.latency_reps}, "
+          f"{args.max_new_tokens} tokens, {device}): {median_latency:.3f}s  "
+          f"({gen_tokens_per_sec:.1f} tokens/s)")
+
     result = {
         "checkpoint": args.checkpoint,
-        "val_loss": round(val_loss, 4),
-        "val_perplexity": round(perplexity, 2),
-        "max_val_stories": args.max_val_stories,
+        "split": args.split,
+        f"{args.split}_loss": round(split_loss, 4),
+        f"{args.split}_perplexity": round(perplexity, 2),
+        "eval_stories": len(eval_texts),
         "eval_iters": args.eval_iters,
+        "device": device,
+        "inference_latency_s_median": round(median_latency, 3),
+        "generation_tokens_per_sec": round(gen_tokens_per_sec, 1),
+        "latency_reps": args.latency_reps,
+        "max_new_tokens": args.max_new_tokens,
         "samples": samples,
     }
     if args.output:
