@@ -184,14 +184,36 @@ All numbers below are from real runs — nothing here is an estimate or a guess.
 Unit checks: 10/10 passed. FastAPI `/health` and `/generate` verified HTTP 200
 against the smoke checkpoint. See `logs/smoke_test_log.txt`.
 
+**Ablations** (in progress — Colab T4, 50,000-story subset, 3,000 steps each,
+seed 42, one variable changed at a time):
+
+| Config | Params | Train loss | Val loss | Val perplexity | Status |
+|---|---|---|---|---|---|
+| Baseline: 6L, 6H, learned, ctx 256 | 13,792,128 | — | — | — | Killed at step 20/3000 by an accidental interrupt; re-runs last |
+| 1 head | 13,792,128 | 2.1257 | 2.1868 | **8.91** | Finished 27 Nov; log + checkpoint on Drive |
+| Sinusoidal pos | 13,792,128 | — | — | — | Was at step 1820/3000 when the GPU was blocked |
+| 2 layers | — | — | — | — | Not started |
+| 4 layers | — | — | — | — | Not started |
+| Context 128 | 13,792,128 | — | — | — | Not started |
+| Context 512 | 13,792,128 | — | — | — | Not started |
+
+The 1-head generation test (2 samples in Colab, temp 0.8, top-k 50) read
+story-like but not fully coherent — broken/repetitive in places.
+Blocked since 27 Nov 06:17 IST: Colab refuses a GPU backend (usage
+limits), so the remaining runs wait for the limit to clear. Full detail in
+[`experiments.md`](experiments.md).
+
 ## Experiments
 
 See [`experiments.md`](experiments.md). Ablations are run as small controlled
 runs on a 50k-story subset (same seed, LR and batch; change one variable at a
-time), then the best config is retrained on the full 200k-story run. Planned
-ablations: single-head vs multi-head attention, learned vs sinusoidal
-positional embeddings, different depths and context lengths, temperature and
-top-k sampling, and perplexity across configurations.
+time), then the best config is retrained on the full 200k-story run. Seven
+configs: single-head vs multi-head attention, learned vs sinusoidal
+positional embeddings, depths 2/4/6, context lengths 128/256/512,
+temperature and top-k sampling, and perplexity across configurations.
+1 head is finished (val perplexity 8.91); the rest are in progress or
+blocked on Colab GPU availability — see the status section in
+`experiments.md`.
 
 ## Links
 

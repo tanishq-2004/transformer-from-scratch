@@ -52,21 +52,60 @@ All configs are evaluated on the **same fixed validation set** with the
 
 ## 7. Perplexity across model configurations
 
-Summary table — one row per configuration above. Fill in only after the runs.
+Summary table — one row per configuration above. Filled only with numbers
+from the actual runs.
 
 | Config | Params | Train loss | Val loss | Val perplexity | Training time |
 |---|---|---|---|---|---|
-| Baseline: 6L, 6H, learned, ctx 256 | _ | _ | _ | _ | _ |
-| 1 head | _ | _ | _ | _ | _ |
-| Sinusoidal pos | _ | _ | _ | _ | _ |
-| 2 layers | _ | _ | _ | _ | _ |
-| 4 layers | _ | _ | _ | _ | _ |
-| Context 128 | _ | _ | _ | _ | _ |
-| Context 512 | _ | _ | _ | _ | _ |
+| Baseline: 6L, 6H, learned, ctx 256 | 13,792,128 | — | — | — | — |
+| 1 head | 13,792,128 | 2.1257 | 2.1868 | 8.91 | — |
+| Sinusoidal pos | 13,792,128 | — | — | — | — |
+| 2 layers | — | — | — | — | — |
+| 4 layers | — | — | — | — | — |
+| Context 128 | 13,792,128 | — | — | — | — |
+| Context 512 | 13,792,128 | — | — | — | — |
+
+## Status — 27 Nov 2026
+
+Runs execute sequentially on a Colab T4 GPU via `run_ablations.sh`
+(nohup, 3,000 steps each on the 50k-story subset, seed 42).
+Each config differs from baseline in exactly one field (verified by diff).
+
+- **1 head — FINISHED 06:05 IST 27 Nov.** Step 2999/3000, train loss
+  2.1257, val loss 2.1868, val perplexity 8.91. Log + final checkpoint
+  (`ckpt_step_3000.pt`) copied to Google Drive. Generation test in Colab
+  (2 samples, "Once upon a time", temp 0.8, top-k 50): story-like but not
+  fully coherent — broken/repetitive in places, not gibberish.
+  Training time (from the log's `elapsed_s`) to be filled from the Drive log
+  at final verification.
+- **Sinusoidal pos — IN PROGRESS at last check (06:05 IST 27 Nov).**
+  Step 1820/3000, val perplexity 32.81 at the step-1500 eval (mid-run,
+  still dropping). Log + checkpoint not yet copied to Drive.
+- **Baseline — KILLED at step 20/3000 (~05:14 IST 27 Nov)** by an
+  accidental Interrupt on the launch cell. Must be re-run to completion
+  after the other six, or the comparisons are meaningless.
+- **2 layers, 4 layers, context 128, context 512 — NOT STARTED.**
+- **BLOCKED since 06:17 IST 27 Nov:** Colab refuses a GPU backend
+  ("Cannot connect to GPU backend — usage limits"), runtime disconnected.
+  No training can resume until the limit clears or Pay As You Go compute
+  units are bought. Keep-alive checks paused at Tanishq's instruction;
+  1-head's finished results are safe on Drive, sinusoidal's partial
+  progress lives only in the Colab VM and is lost if the VM is recycled.
+- **Experiment 5 (temperature/top-k)** is done in practice per finished
+  config (the generation test above); the greedy vs high-temperature
+  comparison from the baseline checkpoint still needs the baseline re-run.
 
 ## How to run an ablation
 
-Copy a config, change one field, run training:
+Configs live in `configs/ablation_*.yaml` (each = `small.yaml` with
+`max_train_stories: 50000`, `max_steps: 3000`, its own checkpoint dir and
+log). All seven run sequentially in the background with:
+
+```bash
+bash run_ablations.sh   # nohup; skips configs whose log already has step 2999
+```
+
+Or one config by hand:
 
 ```bash
 cp configs/small.yaml configs/ablation_1head.yaml
