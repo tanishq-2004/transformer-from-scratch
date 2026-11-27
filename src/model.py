@@ -229,23 +229,31 @@ class TransformerLM(nn.Module):
     @torch.no_grad()
     def generate(self, idx, max_new_tokens: int, temperature: float = 1.0,
                  top_k: int | None = None, top_p: float | None = None,
-                 use_cache: bool = True):
+                 use_cache: bool = True, eos_token_id: int | None = None):
         """Autoregressive generation: feed each new token back in.
 
         idx: (B, T) prompt. Greedy when temperature == 0.
         Top-p (nucleus) sampling keeps the smallest token set whose
         cumulative probability reaches top_p.
-        Returns (B, T + max_new_tokens) token ids.
+        eos_token_id: when given, stop after generating this token
+        (it is appended, then generation ends) instead of always
+        running exactly max_new_tokens. None = no EOS stopping.
+        Returns (B, T + generated) token ids.
         """
         self.eval()
         past_key_values = None
         for _ in range(max_new_tokens):
             # Only the last token needs a forward pass once the cache is warm,
             # but the first step needs the full prompt (cropped to block_size).
-            idx_cond = idx if past_key_values is None else idx[:, -1:]
-            if idx_cond.size(1) > self.config.block_size:
-                idx_cond = idx_cond[:, -self.config.block_size:]
-                past_key_values = None  # cache no longer aligns after cropping
+            if idx.size(1) >= self.config.block_size:
+                # Past the context window: position ids only go up to
+                # block_size - 1, so drop the cache and re-run the last
+                # window each step instead of crashing on an out-of-range
+                # position. The full sequence is still returned.
+                past_key_values = None
+                idx_cond = idx[:, -self.config.block_size:]
+            else:
+                idx_cond = idx if past_key_values is None else idx[:, -1:]
             logits, _, past_key_values = self(
                 idx_cond, past_key_values=past_key_values, use_cache=use_cache
             )
@@ -274,4 +282,6 @@ class TransformerLM(nn.Module):
                 probs = F.softmax(logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
             idx = torch.cat([idx, next_token], dim=1)
+            if eos_token_id is not None and bool((next_token == eos_token_id).any()):
+                break
         return idx

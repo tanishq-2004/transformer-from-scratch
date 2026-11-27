@@ -8,6 +8,8 @@ Usage:
 The model generates one token at a time and feeds it back in (autoregressive),
 using the KV cache in model.py so past tokens are not recomputed.
 Greedy decoding when --temperature 0. Top-p (nucleus) sampling with --top_p.
+Generation stops at <eos> by default (--no_stop_at_eos to disable), and
+--seed makes sampling reproducible.
 """
 
 from __future__ import annotations
@@ -31,8 +33,17 @@ def main():
     parser.add_argument("--top_k", type=int, default=50)
     parser.add_argument("--top_p", type=float, default=None,
                         help="nucleus sampling threshold in (0, 1]; omit to disable")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="random seed for reproducible sampling; omit for random")
+    parser.add_argument("--stop_at_eos", action=argparse.BooleanOptionalAction,
+                        default=True,
+                        help="stop after generating <eos> (default on); "
+                             "--no_stop_at_eos always runs max_new_tokens")
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
+
+    if args.seed is not None:
+        torch.manual_seed(args.seed)
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = load_tokenizer(args.tokenizer)
@@ -62,6 +73,7 @@ def main():
             temperature=args.temperature,
             top_k=args.top_k if args.top_k > 0 else None,
             top_p=args.top_p,
+            eos_token_id=tokenizer.token_to_id("<eos>") if args.stop_at_eos else None,
         )
     print(decode(tokenizer, out[0].tolist()))
 
