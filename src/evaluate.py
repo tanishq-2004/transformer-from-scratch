@@ -15,6 +15,8 @@ Reports, from the actual checkpoint (nothing invented):
     shuffle of the validation stories, disjoint from the validation set,
     and never trained on)
   - generation samples for a fixed set of prompts at temperature 0.8 / top-k 50
+  - model size: parameter count, in-memory size (float32), checkpoint file size
+  - memory: CPU peak RSS, GPU peak allocated (or unavailable if no GPU)
   - inference latency: median wall time for one greedy generation of
     max_new_tokens tokens, plus generation tokens/sec
 Writes the results to logs/eval_<step>.json when --output is given.
@@ -26,6 +28,7 @@ import argparse
 import json
 import math
 import os
+import resource
 import time
 
 import torch
@@ -77,6 +80,14 @@ def main():
     model = TransformerLM(model_cfg).to(device)
     model.load_state_dict(ckpt["model"])
     model.eval()
+
+    # Model size: parameter count, in-memory size (float32), checkpoint file size.
+    num_params = model.num_parameters()
+    param_bytes_mb = num_params * 4 / 1024 ** 2  # float32 parameters
+    ckpt_file_mb = os.path.getsize(args.checkpoint) / 1024 ** 2
+    print(f"model parameters: {num_params:,}")
+    print(f"model size (params, float32): {param_bytes_mb:.1f} MB")
+    print(f"checkpoint file: {ckpt_file_mb:.1f} MB (includes optimizer state)")
 
     if args.split == "test":
         # Test = the second half of a seed-42 shuffle of the validation split.
@@ -135,6 +146,21 @@ def main():
           f"{args.max_new_tokens} tokens, {device}): {median_latency:.3f}s  "
           f"({gen_tokens_per_sec:.1f} tokens/s)")
 
+    # Memory: CPU peak RSS for this process, GPU peak allocated if a GPU
+    # is present (None = unavailable, per the checklist's marking rule).
+    cpu_peak_rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+    if torch.cuda.is_available():
+        gpu_peak_mb = torch.cuda.max_memory_allocated(device) / 1024 ** 2
+        gpu_total_mb = torch.cuda.get_device_properties(device).total_memory / 1024 ** 2
+    else:
+        gpu_peak_mb = None
+        gpu_total_mb = None
+    print(f"\nCPU peak memory (RSS): {cpu_peak_rss_mb:.0f} MB")
+    if gpu_peak_mb is not None:
+        print(f"GPU peak allocated: {gpu_peak_mb:.0f} MB of {gpu_total_mb:.0f} MB")
+    else:
+        print("GPU memory: unavailable (no CUDA device)")
+
     result = {
         "checkpoint": args.checkpoint,
         "split": args.split,
@@ -147,6 +173,12 @@ def main():
         "generation_tokens_per_sec": round(gen_tokens_per_sec, 1),
         "latency_reps": args.latency_reps,
         "max_new_tokens": args.max_new_tokens,
+        "model_params": num_params,
+        "model_size_mb": round(param_bytes_mb, 1),
+        "checkpoint_file_mb": round(ckpt_file_mb, 1),
+        "cpu_peak_rss_mb": round(cpu_peak_rss_mb, 0),
+        "gpu_peak_allocated_mb": round(gpu_peak_mb, 0) if gpu_peak_mb is not None else None,
+        "gpu_total_mb": round(gpu_total_mb, 0) if gpu_total_mb is not None else None,
         "samples": samples,
     }
     if args.output:
