@@ -7,7 +7,7 @@ Usage:
 
 The model generates one token at a time and feeds it back in (autoregressive),
 using the KV cache in model.py so past tokens are not recomputed.
-Greedy decoding when --temperature 0.
+Greedy decoding when --temperature 0. Top-p (nucleus) sampling with --top_p.
 """
 
 from __future__ import annotations
@@ -29,6 +29,8 @@ def main():
     parser.add_argument("--max_new_tokens", type=int, default=50)
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--top_k", type=int, default=50)
+    parser.add_argument("--top_p", type=float, default=None,
+                        help="nucleus sampling threshold in (0, 1]; omit to disable")
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
 
@@ -59,6 +61,7 @@ def main():
             max_new_tokens=args.max_new_tokens,
             temperature=args.temperature,
             top_k=args.top_k if args.top_k > 0 else None,
+            top_p=args.top_p,
         )
     print(decode(tokenizer, out[0].tolist()))
 

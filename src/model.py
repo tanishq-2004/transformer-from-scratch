@@ -228,10 +228,13 @@ class TransformerLM(nn.Module):
 
     @torch.no_grad()
     def generate(self, idx, max_new_tokens: int, temperature: float = 1.0,
-                 top_k: int | None = None, use_cache: bool = True):
+                 top_k: int | None = None, top_p: float | None = None,
+                 use_cache: bool = True):
         """Autoregressive generation: feed each new token back in.
 
         idx: (B, T) prompt. Greedy when temperature == 0.
+        Top-p (nucleus) sampling keeps the smallest token set whose
+        cumulative probability reaches top_p.
         Returns (B, T + max_new_tokens) token ids.
         """
         self.eval()
@@ -256,6 +259,17 @@ class TransformerLM(nn.Module):
                     top_values, _ = torch.topk(logits, min(top_k, logits.size(-1)))
                     logits = logits.masked_fill(
                         logits < top_values[:, [-1]], float("-inf")
+                    )
+                if top_p is not None:
+                    # Nucleus sampling: keep the smallest set of tokens
+                    # whose cumulative probability reaches top_p.
+                    sorted_logits, sorted_indices = torch.sort(logits, descending=True)
+                    sorted_probs = F.softmax(sorted_logits, dim=-1)
+                    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+                    sorted_to_remove = cumulative_probs - sorted_probs > top_p
+                    sorted_logits[sorted_to_remove] = float("-inf")
+                    logits = torch.zeros_like(logits).scatter(
+                        -1, sorted_indices, sorted_logits
                     )
                 probs = F.softmax(logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
