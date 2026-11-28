@@ -52,8 +52,8 @@ project and a small experimental model, not a production system (see
 | Training | 8,000 steps, 6,071 s (~101 min) on a Colab T4 GPU |
 | Final train loss | **1.7893** |
 | Final val loss | **1.8295** |
-| Final val perplexity | **6.23** |
-| Test perplexity | **6.31** (held-out test split, 2,000 stories) |
+| Final val perplexity | **6.23** (training log; independent evaluation: 6.21) |
+| Test perplexity | **6.32** (held-out test split, 2,000 stories, deduped) |
 
 ## How it works
 
@@ -437,49 +437,67 @@ Sampling options:
 - `--top_p 0.9` — nucleus sampling: keep the smallest set of tokens whose
   cumulative probability reaches 0.9, applied after top-k.
 
-Generation is not seeded, so sampling runs are not reproducible — run the
-same command twice and the two samples will differ. Only greedy decoding is
-deterministic.
+Pass `--seed 42` for reproducible sampling — the same seed gives the same
+output (verified: seed 42 twice is byte-identical, seed 43 differs).
+Without a seed, sampling runs vary; greedy decoding is deterministic on
+its own.
 
 ## Evaluation
 
 ```bash
 python -m src.evaluate --checkpoint checkpoints/ckpt_step_8000.pt \
   --tokenizer checkpoints/tokenizer.json --config configs/small.yaml \
-  --split test --output logs/eval_test.json
+  --split test --seed 42 --dedupe --output logs/eval_test_deduped.json
 ```
 
 `src/evaluate.py` reports, from the actual checkpoint:
 
 - Cross-entropy loss and perplexity on the chosen split. The **test** split
   is the second half of a seed-42 shuffle of the validation stories, disjoint
-  from the validation set and never trained on.
-- Four generation samples for fixed prompts at temperature 0.8 / top-k 50.
+  from the validation set. TinyStories' official splits contain exact
+  duplicate stories, so ~2.5% of the eval stories also appear in the train
+  subset — pass `--dedupe` to replace them with fresh validation stories,
+  keeping the set at 2,000 genuinely held-out stories
+  (see `verify_test_split.py`).
+- Four generation samples for fixed prompts at temperature 0.8 / top-k 50,
+  with `--seed 42` so they are reproducible.
 - Model size: parameter count, in-memory float32 size, checkpoint file size.
 - Memory: CPU peak RSS, GPU peak allocated when a GPU is present.
 - Inference latency: median wall time for one greedy 50-token generation
   (5 repetitions), plus generation tokens/sec.
 
-Results for the final checkpoint (`logs/eval_test.json`, measured 28 Nov 2026
-on CPU):
+Results for the final checkpoint (deduped runs
+`logs/eval_test_deduped.json` and `logs/eval_validation_deduped.json`,
+measured 28 Nov 2026 on CPU, seed 42):
 
 | Metric | Value |
 |---|---|
-| Test loss | 1.8419 |
-| Test perplexity | 6.31 (2,000 stories, 50 batches) |
-| Validation perplexity | 6.23 (from training) |
-| Inference latency | 0.984 s median for 50 tokens |
+| Test loss | 1.8430 |
+| Test perplexity | 6.32 (2,000 held-out stories, 50 batches) |
+| Validation loss | 1.8260 |
+| Validation perplexity | 6.21 (2,000 held-out stories, 50 batches) |
+| Inference latency | 0.991 s median for 50 tokens |
 | Live demo latency (ZeroGPU) | 3.09 s median for 50 tokens (4 timed runs, 28 Nov 2026) |
-| Generation speed | 50.8 tokens/sec (CPU) |
+| Generation speed | 50.5 tokens/sec (CPU) |
 | Parameters | 13,792,128 |
 | Model size (float32) | 52.6 MB |
 | Checkpoint file | 159.4 MB (includes optimiser state) |
-| CPU peak memory (RSS) | 1,885 MB |
+| CPU peak memory (RSS) | 1,756 MB |
 | GPU memory | Unavailable (no CUDA device on the eval machine) |
 
-The test perplexity (6.31) is close to the validation perplexity (6.23),
+The test perplexity (6.32) is close to the validation perplexity (6.21),
 which is the expected result: the test split comes from the same distribution
 and the model is not overfitting it.
+
+**Held-out check.** The dedupe matters for honesty, not for the number:
+the un-deduped runs measured test 6.31 and validation 6.19, so the 54 test
+and 50 validation stories that were exact duplicates of training stories
+moved the perplexity by only 0.01–0.02. `verify_test_split.py` rebuilds both
+sets with the evaluator's own code and checks them — 2,000 stories each,
+disjoint from each other, zero overlap with the 200,000-story train subset,
+all from the validation split, no internal duplicates (9 checks, all pass).
+The train-story hashes come from `build_train_hashes.py` (local-only,
+`data/` is gitignored).
 
 ## Experiments
 
@@ -583,24 +601,25 @@ greedy generation). FastAPI `/health` and `/generate` verified HTTP 200
 against the smoke checkpoint.
 
 **Sample generations** — real outputs from the final checkpoint
-(`ckpt_step_8000.pt`), temperature 0.8, top-k 50, 50 tokens each, from the
-evaluation run (`logs/eval_test.json`):
+(`ckpt_step_8000.pt`), temperature 0.8, top-k 50, seed 42, 50 tokens each,
+from the deduped evaluation run (`logs/eval_test_deduped.json`):
 
 **Prompt:** `Once upon a time`
 
-> Once upon a time, there were two friends, a boy and a girl named Sarah.
-> They both lived together in a big garden. One day, Sally said to Sarah,
-> "Let's have a race!" Sarah was so excited and said, "Yes,"
+> Once upon a time, there was a little girl called Sarah. She had a very
+> special belt that she liked to wear. Every day, Sarah would wear it every
+> day. One day, Sarah was playing with her belt and her mom said, "Let's
 
 **Prompt:** `Tom was a little boy`
 
-> Tom was a little boy who liked to play outside. He had a big yard with a
-> swing and a slide. He also liked to run, jump, slide and run. But one day,
-> he saw a big sign that said "No Cricoet". He liked
+> Tom was a little boy who loved to play with his toys. He had many toys,
+> but his favorite was a doll. The doll was soft and soft, and Tom always
+> took his toys everywhere. One day, Tom and his doll were playing with the
+> doll in
 
-The samples are coherent TinyStories-style text with small-model flaws — a
-made-up word here ("Cricoet"), some repetition there. That is the honest
-picture of what a 13.8M-parameter model trained on 44M tokens can do.
+The samples are coherent TinyStories-style text with small-model flaws —
+some repetition ("soft and soft", "wear it every day" twice). That is the
+honest picture of what a 13.8M-parameter model trained on 44M tokens can do.
 
 ## Limitations
 
@@ -617,10 +636,9 @@ picture of what a 13.8M-parameter model trained on 44M tokens can do.
   subject to Hugging Face's free-tier queue and guest quota (3 generations
   for guests — sign in for more).
 - **Unmeasured items.** No GPU latency or memory numbers (no CUDA on the eval
-  machine); no trigram baseline perplexity for comparison; generation samples
-  are not reproducible (temperature 0.8, no seed); the context-512 ablation
-  never finished, and the Kaggle ablation files were lost when that session
-  ended (see the experiments section).
+  machine); no trigram baseline perplexity for comparison; the context-512
+  ablation never finished, and the Kaggle ablation files were lost when that
+  session ended (see the experiments section).
 
 ## Future improvements
 

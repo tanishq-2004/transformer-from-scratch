@@ -12,8 +12,11 @@ Usage:
 Reports, from the actual checkpoint (nothing invented):
   - cross-entropy loss and perplexity = exp(loss) on the chosen split
     (validation, or test — the test split is the second half of a seed-42
-    shuffle of the validation stories, disjoint from the validation set,
-    and never trained on)
+    shuffle of the validation stories, disjoint from the validation set.
+    Note: TinyStories' official splits contain exact duplicate stories, so
+    ~2.5% of the eval stories also appear in the train subset; pass
+    --dedupe to replace them with fresh validation stories, keeping the
+    set at full size and genuinely held out)
   - generation samples for a fixed set of prompts at temperature 0.8 / top-k 50
   - model size: parameter count, in-memory size (float32), checkpoint file size
   - memory: CPU peak RSS, GPU peak allocated (or unavailable if no GPU)
@@ -25,12 +28,15 @@ Writes the results to logs/eval_<step>.json when --output is given.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
+import random
 import resource
 import time
 
+import numpy as np
 import torch
 import yaml
 
@@ -46,6 +52,66 @@ DEFAULT_PROMPTS = [
 ]
 
 
+def build_eval_texts(split, max_val_stories=2000, max_test_stories=2000,
+                     dedupe=False, train_hashes_path=None):
+    """Build the stories to evaluate perplexity on.
+
+    Validation = the first max_val_stories of a seed-42 shuffle of the
+    validation split; test = the next max_test_stories of the same shuffle.
+    The two sets are disjoint by construction.
+
+    With dedupe=True, stories whose exact text also appears in the train
+    subset (TinyStories' official splits contain duplicates) are replaced
+    with fresh validation stories from later in the same shuffle, so the
+    set stays at full size and is genuinely held out.
+    Returns (eval_texts, dropped_overlap, replaced).
+    """
+    pool = load_tinystories_texts(
+        "validation", max_val_stories + max_test_stories + 2000)
+    if split == "test":
+        base = pool[max_val_stories:max_val_stories + max_test_stories]
+        # Replacements come from a different range than the validation
+        # set's, so the two deduped sets stay disjoint.
+        candidates = pool[max_val_stories + max_test_stories + 1000:]
+    else:
+        base = pool[:max_val_stories]
+        candidates = pool[max_val_stories + max_test_stories:
+                          max_val_stories + max_test_stories + 1000]
+    dropped = 0
+    replaced = 0
+    if dedupe:
+        if train_hashes_path is None:
+            train_hashes_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "..", "data", "train_story_hashes.txt")
+        if not os.path.exists(train_hashes_path):
+            raise SystemExit(
+                "dedupe needs data/train_story_hashes.txt — "
+                "run `python build_train_hashes.py` first")
+        with open(train_hashes_path) as f:
+            train_hashes = {line.strip() for line in f}
+
+        def is_clean(text):
+            return hashlib.sha256(text.encode("utf-8")).hexdigest() not in train_hashes
+
+        kept = [t for t in base if is_clean(t)]
+        dropped = len(base) - len(kept)
+        target = len(base)
+        fill = [t for t in candidates if is_clean(t)][:target - len(kept)]
+        replaced = len(fill)
+        eval_texts = kept + fill
+        if len(eval_texts) != target:
+            raise SystemExit(
+                f"dedupe could only build {len(eval_texts)} held-out stories "
+                f"(wanted {target}) — the replacement pool ran out")
+        print(f"dedupe: dropped {dropped} stories also in the train subset, "
+              f"replaced with {replaced} fresh validation stories; "
+              f"{len(eval_texts)} held-out stories")
+    else:
+        eval_texts = list(base)
+    return eval_texts, dropped, replaced
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
@@ -59,8 +125,24 @@ def main():
     parser.add_argument("--max_new_tokens", type=int, default=50)
     parser.add_argument("--latency_reps", type=int, default=5,
                         help="repetitions for the median inference-latency measurement")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="random seed: same seed gives the same batches and samples")
+    parser.add_argument("--dedupe", action="store_true",
+                        help="drop eval stories whose exact text appears in the "
+                             "train subset (TinyStories splits contain duplicates) "
+                             "and replace them with fresh validation stories, "
+                             "keeping the set at full size; "
+                             "needs data/train_story_hashes.txt from "
+                             "build_train_hashes.py")
     parser.add_argument("--output", default=None)
     args = parser.parse_args()
+
+    if args.seed is not None:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
 
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
@@ -89,14 +171,10 @@ def main():
     print(f"model size (params, float32): {param_bytes_mb:.1f} MB")
     print(f"checkpoint file: {ckpt_file_mb:.1f} MB (includes optimizer state)")
 
-    if args.split == "test":
-        # Test = the second half of a seed-42 shuffle of the validation split.
-        # The first half is the validation set, so test is disjoint from it,
-        # and neither half was ever trained on.
-        all_val_texts = load_tinystories_texts("validation", args.max_test_stories * 2)
-        eval_texts = all_val_texts[args.max_test_stories:]
-    else:
-        eval_texts = load_tinystories_texts("validation", args.max_val_stories)
+    eval_texts, dropped_overlap, replaced = build_eval_texts(
+        args.split, args.max_val_stories, args.max_test_stories,
+        dedupe=args.dedupe)
+
     eval_data = encode_texts_to_array(
         lambda t: encode(tokenizer, t, add_bos=True, add_eos=True), eval_texts
     )
@@ -168,6 +246,9 @@ def main():
         f"{args.split}_perplexity": round(perplexity, 2),
         "eval_stories": len(eval_texts),
         "eval_iters": args.eval_iters,
+        "deduped": bool(args.dedupe),
+        "dropped_overlap": dropped_overlap,
+        "replaced": replaced,
         "device": device,
         "inference_latency_s_median": round(median_latency, 3),
         "generation_tokens_per_sec": round(gen_tokens_per_sec, 1),

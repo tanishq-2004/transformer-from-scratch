@@ -13,7 +13,9 @@ Greedy decoding when --temperature 0. Top-p (nucleus) sampling with --top_p.
 from __future__ import annotations
 
 import argparse
+import random
 
+import numpy as np
 import torch
 import yaml
 
@@ -31,8 +33,17 @@ def main():
     parser.add_argument("--top_k", type=int, default=50)
     parser.add_argument("--top_p", type=float, default=None,
                         help="nucleus sampling threshold in (0, 1]; omit to disable")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="random seed for sampling; same seed gives the same output")
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
+
+    if args.seed is not None:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     tokenizer = load_tokenizer(args.tokenizer)
