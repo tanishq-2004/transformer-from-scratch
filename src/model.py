@@ -229,16 +229,13 @@ class TransformerLM(nn.Module):
     @torch.no_grad()
     def generate(self, idx, max_new_tokens: int, temperature: float = 1.0,
                  top_k: int | None = None, top_p: float | None = None,
-                 use_cache: bool = True, eos_token_id: int | None = None):
+                 use_cache: bool = True):
         """Autoregressive generation: feed each new token back in.
 
         idx: (B, T) prompt. Greedy when temperature == 0.
         Top-p (nucleus) sampling keeps the smallest token set whose
         cumulative probability reaches top_p.
-        eos_token_id: when given, stop after generating this token
-        (it is appended, then generation ends) instead of always
-        running exactly max_new_tokens. None = no EOS stopping.
-        Returns (B, T + generated) token ids.
+        Returns (B, T + max_new_tokens) token ids.
         """
         self.eval()
         past_key_values = None
@@ -282,6 +279,4 @@ class TransformerLM(nn.Module):
                 probs = F.softmax(logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
             idx = torch.cat([idx, next_token], dim=1)
-            if eos_token_id is not None and bool((next_token == eos_token_id).any()):
-                break
         return idx
