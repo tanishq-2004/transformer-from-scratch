@@ -469,6 +469,7 @@ on CPU):
 | Test perplexity | 6.31 (2,000 stories, 50 batches) |
 | Validation perplexity | 6.23 (from training) |
 | Inference latency | 0.984 s median for 50 tokens |
+| Live demo latency (ZeroGPU) | 3.09 s median for 50 tokens (4 timed runs, 28 Nov 2026) |
 | Generation speed | 50.8 tokens/sec (CPU) |
 | Parameters | 13,792,128 |
 | Model size (float32) | 52.6 MB |
