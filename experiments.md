@@ -57,43 +57,59 @@ from the actual runs.
 
 | Config | Params | Train loss | Val loss | Val perplexity | Training time |
 |---|---|---|---|---|---|
-| Baseline: 6L, 6H, learned, ctx 256 | 13,792,128 | — | — | — | — |
-| 1 head | 13,792,128 | 2.1257 | 2.1868 | 8.91 | — |
-| Sinusoidal pos | 13,792,128 | — | — | — | — |
-| 2 layers | — | — | — | — | — |
-| 4 layers | — | — | — | — | — |
-| Context 128 | 13,792,128 | — | — | — | — |
-| Context 512 | 13,792,128 | — | — | — | — |
+| Baseline: 6L, 6H, learned, ctx 256 | 13,792,128 | 2.0967 | 2.1619 | 8.69 | 2,381 s |
+| 1 head | 13,792,128 | 2.1257 | 2.1868 | 8.91 | 2,162 s |
+| Sinusoidal pos | 13,693,824 | 3.0971 | 3.1244 | 22.75 | 2,360 s |
+| 2 layers | 6,711,168 | 2.3038 | 2.3753 | 10.75 | 1,130 s |
+| 4 layers | 10,251,648 | 2.1698 | 2.2258 | 9.26 | 1,750 s |
+| Context 128 | 13,742,976 | 2.3064 | 2.3643 | 10.64 | 1,100 s |
+| Context 512 | 13,890,432 | — | — | — | — |
 
-## Status — 27 Nov 2026
+## Status — 28 Nov 2026 (final)
 
-Runs execute sequentially on a Colab T4 GPU via `run_ablations.sh`
-(nohup, 3,000 steps each on the 50k-story subset, seed 42).
-Each config differs from baseline in exactly one field (verified by diff).
+6 of 7 training configs finished. Baseline and 1-head finished on Colab
+(28 Nov re-runs; the 27 Nov baseline attempt was killed at step 20 by an
+accidental interrupt and re-run). Sinusoidal, 2-layer, 4-layer and context-128
+finished on Kaggle. Context-512 did not finish — its last verified state was
+step 2,460/3,000 with a step-2,000 validation perplexity of 8.41 (mid-run,
+not a final); its final number is unknown.
 
-- **1 head — FINISHED 06:05 IST 27 Nov.** Step 2999/3000, train loss
-  2.1257, val loss 2.1868, val perplexity 8.91. Log + final checkpoint
-  (`ckpt_step_3000.pt`) copied to Google Drive. Generation test in Colab
-  (2 samples, "Once upon a time", temp 0.8, top-k 50): story-like but not
-  fully coherent — broken/repetitive in places, not gibberish.
-  Training time (from the log's `elapsed_s`) to be filled from the Drive log
-  at final verification.
-- **Sinusoidal pos — IN PROGRESS at last check (06:05 IST 27 Nov).**
-  Step 1820/3000, val perplexity 32.81 at the step-1500 eval (mid-run,
-  still dropping). Log + checkpoint not yet copied to Drive.
-- **Baseline — KILLED at step 20/3000 (~05:14 IST 27 Nov)** by an
-  accidental Interrupt on the launch cell. Must be re-run to completion
-  after the other six, or the comparisons are meaningless.
-- **2 layers, 4 layers, context 128, context 512 — NOT STARTED.**
-- **BLOCKED since 06:17 IST 27 Nov:** Colab refuses a GPU backend
-  ("Cannot connect to GPU backend — usage limits"), runtime disconnected.
-  No training can resume until the limit clears or Pay As You Go compute
-  units are bought. Keep-alive checks paused at Tanishq's instruction;
-  1-head's finished results are safe on Drive, sinusoidal's partial
-  progress lives only in the Colab VM and is lost if the VM is recycled.
+**Provenance warning.** The Kaggle session ended before the five Kaggle
+configs' files were downloaded, so their log CSVs, checkpoints and generation
+samples are lost — the notebook has no saved versions and Kaggle does not
+retain a stopped session's working directory. The numbers in the table above
+were read from the logs live, while the runs were still verifiable, and the
+elapsed times come from the same logs. Nothing in the table is invented;
+where data is missing, it is marked missing. Baseline and 1-head logs,
+checkpoints and generation samples are safe on Google Drive.
+
+- **Baseline — FINISHED 02:20 IST 28 Nov (Colab re-run).** Step 2999/3000,
+  train loss 2.0967, val loss 2.1619, val perplexity 8.69, elapsed 2,380.8 s.
+  Generation test: 4 samples, all coherent TinyStories-style, greedy
+  cleanest.
+- **1 head — FINISHED ~03:01 IST 28 Nov (Colab re-run).** Step 2999/3000,
+  train loss 2.1257, val loss 2.1868, val perplexity 8.91, elapsed 2,162.2 s.
+  Identical losses to the 27 Nov run. Generation test: 2 samples, coherent
+  with minor small-model repetition.
+- **Sinusoidal pos — FINISHED (Kaggle).** Step 2999/3000, train loss 3.0971,
+  val loss 3.1244, val perplexity 22.75, elapsed 2,360.0 s. By far the worst
+  config.
+- **2 layers — FINISHED (Kaggle).** Step 2999/3000, train loss 2.3038, val
+  loss 2.3753, val perplexity 10.75, elapsed 1,130.2 s.
+- **4 layers — FINISHED (Kaggle).** Step 2999/3000, train loss 2.1698, val
+  loss 2.2258, val perplexity 9.26, elapsed 1,750.0 s.
+- **Context 128 — FINISHED (Kaggle).** Step 2999/3000, train loss 2.3064,
+  val loss 2.3643, val perplexity 10.64, elapsed 1,099.5 s. One generation
+  sample survives in the notebook ("Once upon a time there was a girl, who
+  loved to play with her toys…").
+- **Context 512 — NOT FINISHED.** No step-2999 line, no checkpoint, no
+  generation file. Last verified state 06:49 IST 28 Nov: step 2,460/3,000.
 - **Experiment 5 (temperature/top-k)** is done in practice per finished
-  config (the generation test above); the greedy vs high-temperature
-  comparison from the baseline checkpoint still needs the baseline re-run.
+  config (the generation tests above); the Kaggle configs' samples were
+  lost with the session.
+- **Parameter counts** in the table were verified by instantiating each
+  config (sinusoidal has no learned position table, so it has 98,304 fewer
+  parameters than the baseline; head count does not change the count).
 
 ## How to run an ablation
 
